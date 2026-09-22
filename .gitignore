@@ -41,11 +41,6 @@ env/
 .env
 .env.local
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
 # Streamlit
 .streamlit/secrets.toml
 .streamlit/cache/
