@@ -50,9 +50,9 @@ elif page == "Players":
     try:
         # Fetch all players from database
         players = db.fetch_all("""
-            SELECT id, voornaam, achternaam, fide_elo, sterktelijst_elo, created_at
-            FROM spelers
-            ORDER BY fide_elo DESC
+            SELECT id, club, idnumber, name, cluborig, rating, f_elo, b_elo, titular
+            FROM playerlist
+            ORDER BY rating DESC
         """)
         
         if players:
@@ -62,11 +62,14 @@ elif page == "Players":
             # Rename columns for display
             df = df.rename(columns={
                 'id': 'ID',
-                'voornaam': 'First Name',
-                'achternaam': 'Last Name',
-                'fide_elo': 'FIDE ELO',
-                'sterktelijst_elo': 'Strength List ELO',
-                'created_at': 'Added'
+                'club': 'Club',
+                'idnumber': 'ID Number',
+                'name': 'Name',
+                'cluborig': 'Original Club',
+                'rating': 'Rating',
+                'f_elo': 'FIDE ELO',
+                'b_elo': 'B ELO',
+                'titular': 'Titular'
             })
             
             # Display statistics
@@ -74,27 +77,30 @@ elif page == "Players":
             with col1:
                 st.metric("Total Players", len(df))
             with col2:
-                st.metric("Highest ELO", df['FIDE ELO'].max())
+                st.metric("Highest Rating", df['Rating'].max())
             with col3:
-                st.metric("Average ELO", f"{df['FIDE ELO'].mean():.0f}")
+                st.metric("Average Rating", f"{df['Rating'].mean():.0f}")
             with col4:
-                st.metric("Lowest ELO", df['FIDE ELO'].min())
+                st.metric("Lowest Rating", df['Rating'].min())
             
             st.markdown("---")
             
             # Display the table
-            st.subheader("Player Rankings")
+            st.subheader("Player List")
             st.dataframe(
                 df,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "ID": st.column_config.NumberColumn(width="small"),
-                    "First Name": st.column_config.TextColumn(width="medium"),
-                    "Last Name": st.column_config.TextColumn(width="medium"),
+                    "Club": st.column_config.NumberColumn(width="small"),
+                    "ID Number": st.column_config.NumberColumn(width="medium"),
+                    "Name": st.column_config.TextColumn(width="large"),
+                    "Original Club": st.column_config.NumberColumn(width="small"),
+                    "Rating": st.column_config.NumberColumn(width="medium"),
                     "FIDE ELO": st.column_config.NumberColumn(width="medium"),
-                    "Strength List ELO": st.column_config.NumberColumn(width="medium"),
-                    "Added": st.column_config.TextColumn(width="medium"),
+                    "B ELO": st.column_config.NumberColumn(width="medium"),
+                    "Titular": st.column_config.TextColumn(width="medium"),
                 }
             )
             
@@ -107,7 +113,7 @@ elif page == "Players":
                 st.download_button(
                     label="📥 Download as CSV",
                     data=csv,
-                    file_name="players.csv",
+                    file_name="playerlist.csv",
                     mime="text/csv"
                 )
             
@@ -116,7 +122,7 @@ elif page == "Players":
                 st.download_button(
                     label="📥 Download as JSON",
                     data=json,
-                    file_name="players.json",
+                    file_name="playerlist.json",
                     mime="application/json"
                 )
         else:
@@ -130,17 +136,27 @@ elif page == "Team Selection":
     st.markdown("Select 6 players to create your team")
     
     try:
-        # Fetch all players for selection sorted by strength list ELO
+        # Fetch all players for selection sorted by rating
         all_players = db.fetch_all("""
-            SELECT id, voornaam, achternaam, fide_elo, sterktelijst_elo
-            FROM spelers
-            ORDER BY sterktelijst_elo DESC
+            SELECT id, name, rating, f_elo
+            FROM playerlist
+            ORDER BY rating DESC
         """)
         
         if all_players:
-            # Create a session state for selected players
-            if 'selected_players' not in st.session_state:
-                st.session_state.selected_players = []
+            # Create a session state dictionary for player selections
+            if 'player_selections' not in st.session_state:
+                st.session_state.player_selections = {p['id']: False for p in all_players}
+            
+            # Ensure all players are in the selection dict
+            for player in all_players:
+                player_id = player['id']
+                if player_id not in st.session_state.player_selections:
+                    st.session_state.player_selections[player_id] = False
+            
+            # Create a reset counter to force checkbox state refresh
+            if 'reset_counter' not in st.session_state:
+                st.session_state.reset_counter = 0
             
             # Create player selection interface
             st.subheader("Available Players")
@@ -148,33 +164,32 @@ elif page == "Team Selection":
             # Display players in columns for better layout
             cols = st.columns(3)
             col_idx = 0
-            player_selection = {}
             
             for player in all_players:
-                player_name = f"{player['voornaam']} {player['achternaam']} ({player['fide_elo']} ELO)"
+                player_name = f"{player['name']} ({player['rating']} Rating)"
                 player_id = player['id']
                 
                 with cols[col_idx % 3]:
                     is_selected = st.checkbox(
                         player_name,
-                        value=player_id in st.session_state.selected_players,
-                        key=f"player_{player_id}"
+                        value=st.session_state.player_selections.get(player_id, False),
+                        key=f"player_{player_id}_{st.session_state.reset_counter}"
                     )
                     
-                    if is_selected:
-                        if player_id not in st.session_state.selected_players:
-                            st.session_state.selected_players.append(player_id)
-                    else:
-                        if player_id in st.session_state.selected_players:
-                            st.session_state.selected_players.remove(player_id)
+                    # Update session state
+                    st.session_state.player_selections[player_id] = is_selected
                 
-                player_selection[player_id] = is_selected
                 col_idx += 1
             
             st.markdown("---")
             
-            # Show selection count
-            selected_count = len(st.session_state.selected_players)
+            # Compute selected players list
+            selected_players = [
+                player_id for player_id, selected in st.session_state.player_selections.items()
+                if selected
+            ]
+            selected_count = len(selected_players)
+            
             if selected_count == 6:
                 st.success(f"✅ {selected_count}/6 players selected - Ready to create team!")
             elif selected_count > 6:
@@ -182,20 +197,45 @@ elif page == "Team Selection":
             else:
                 st.info(f"📋 {selected_count}/6 players selected - Select {6 - selected_count} more")
             
-            # Create team button
+            # Create team buttons
             col1, col2, col3 = st.columns([1, 1, 2])
             
             with col1:
-                if st.button("🏆 Create Team", disabled=(selected_count != 6)):
+                if st.button("Standard Team", disabled=(selected_count != 6)):
                     if selected_count == 6:
-                        # Fetch selected players data sorted by strength list ELO
+                        # Fetch selected players data sorted by rating
                         placeholders = ','.join('?' * 6)
                         selected_players_data = db.fetch_all(f"""
-                            SELECT id, voornaam, achternaam, fide_elo, sterktelijst_elo
-                            FROM spelers
+                            SELECT id, name, rating, f_elo
+                            FROM playerlist
                             WHERE id IN ({placeholders})
-                            ORDER BY sterktelijst_elo DESC
-                        """, tuple(st.session_state.selected_players))
+                            ORDER BY rating DESC
+                        """, tuple(selected_players))
+                        
+                        # Create standard board assignment: [1, 2, 3, 4, 5, 6]
+                        standard_config = list(range(1, 7))
+                        
+                        # Format team with board assignments
+                        team_with_boards = TeamManager.format_team_assignment(
+                            selected_players_data,
+                            standard_config
+                        )
+                        
+                        # Store in session state
+                        st.session_state.created_team = team_with_boards
+                        st.session_state.valid_team_count = 1  # Only one standard configuration
+            
+            with col2:
+                if st.button("Hutsekluts Team", disabled=(selected_count != 6)):
+                    if selected_count == 6:
+                        # Fetch selected players data sorted by rating
+                        placeholders = ','.join('?' * 6)
+                        selected_players_data = db.fetch_all(f"""
+                            SELECT id, name, rating, f_elo
+                            FROM playerlist
+                            WHERE id IN ({placeholders})
+                            ORDER BY rating DESC
+                        """, tuple(selected_players))
                         
                         # Calculate all valid team configurations and pick a random one
                         valid_configs = TeamManager.get_all_valid_assignments(6)
@@ -211,9 +251,13 @@ elif page == "Team Selection":
                         st.session_state.created_team = team_with_boards
                         st.session_state.valid_team_count = len(valid_configs)
             
-            with col2:
+            with col3:
                 if st.button("🔄 Clear Selection"):
-                    st.session_state.selected_players = []
+                    # Increment reset counter to force checkbox widgets to reset
+                    st.session_state.reset_counter += 1
+                    # Reset all selections to False
+                    for player_id in st.session_state.player_selections:
+                        st.session_state.player_selections[player_id] = False
                     st.rerun()
             
             # Display created team if exists
@@ -228,16 +272,15 @@ elif page == "Team Selection":
                 team_df = pd.DataFrame(st.session_state.created_team)
                 team_df = team_df.rename(columns={
                     'id': 'ID',
-                    'voornaam': 'First Name',
-                    'achternaam': 'Last Name',
-                    'fide_elo': 'FIDE ELO',
-                    'sterktelijst_elo': 'Strength ELO',
+                    'name': 'Name',
+                    'rating': 'Rating',
+                    'f_elo': 'FIDE ELO',
                     'rank': 'Strength Rank',
                     'board': 'Board Position'
                 })
                 
                 # Select columns to display
-                display_cols = ['Board Position', 'Strength Rank', 'First Name', 'Last Name', 'FIDE ELO', 'Strength ELO']
+                display_cols = ['Board Position', 'Strength Rank', 'Name', 'Rating', 'FIDE ELO']
                 team_df = team_df[display_cols]
                 
                 # Display team statistics
@@ -245,11 +288,11 @@ elif page == "Team Selection":
                 with col1:
                     st.metric("Team Size", len(team_df))
                 with col2:
-                    st.metric("Avg Strength ELO", f"{team_df['Strength ELO'].mean():.0f}")
+                    st.metric("Avg Rating", f"{team_df['Rating'].mean():.0f}")
                 with col3:
-                    st.metric("Total Strength ELO", f"{team_df['Strength ELO'].sum()}")
+                    st.metric("Total Rating", f"{team_df['Rating'].sum()}")
                 with col4:
-                    st.metric("Strongest Player", f"{team_df['Strength ELO'].max()}")
+                    st.metric("Strongest Player", f"{team_df['Rating'].max()}")
                 
                 st.markdown("")
                 st.dataframe(
@@ -259,10 +302,9 @@ elif page == "Team Selection":
                     column_config={
                         "Board Position": st.column_config.NumberColumn(width="small"),
                         "Strength Rank": st.column_config.NumberColumn(width="small"),
-                        "First Name": st.column_config.TextColumn(width="medium"),
-                        "Last Name": st.column_config.TextColumn(width="medium"),
+                        "Name": st.column_config.TextColumn(width="medium"),
+                        "Rating": st.column_config.NumberColumn(width="small"),
                         "FIDE ELO": st.column_config.NumberColumn(width="small"),
-                        "Strength ELO": st.column_config.NumberColumn(width="small"),
                     }
                 )
                 
@@ -278,7 +320,7 @@ elif page == "Team Selection":
                     allowed_boards = TeamManager.get_allowed_boards(rank, 6)
                     status = "✅" if board in allowed_boards else "❌"
                     rule_info.append({
-                        "Player": f"{player['First Name']} {player['Last Name']}",
+                        "Player": f"{player['Name']}",
                         "Strength Rank": rank,
                         "Board Position": board,
                         "Offset": f"{offset:+d}",
